@@ -10,6 +10,7 @@ from rclpy.node import Node
 from cv_bridge import CvBridge
 
 from ultralytics import YOLO
+from ultralytics.yolo.utils.plotting import Annotator, colors
 from ultralytics.tracker import BOTSORT, BYTETracker
 from ultralytics.tracker.trackers.basetrack import BaseTrack
 from ultralytics.yolo.utils import IterableSimpleNamespace, yaml_load
@@ -22,32 +23,6 @@ from vision_msgs.msg import ObjectHypothesisWithPose
 from vision_msgs.msg import Detection2DArray
 from std_srvs.srv import SetBool
 from sensor_msgs.msg import PointCloud2
-
-class Colors:
-    # Ultralytics color palette https://ultralytics.com/
-    def __init__(self):
-        """Initialize colors as hex = matplotlib.colors.TABLEAU_COLORS.values()."""
-        hexs = ('FF3838', 'FF9D97', 'FF701F', 'FFB21D', 'CFD231', '48F90A', '92CC17', '3DDB86', '1A9334', '00D4BB',
-                '2C99A8', '00C2FF', '344593', '6473FF', '0018EC', '8438FF', '520085', 'CB38FF', 'FF95C8', 'FF37C7')
-        self.palette = [self.hex2rgb(f'#{c}') for c in hexs]
-        self.n = len(self.palette)
-        self.pose_palette = np.array([[255, 128, 0], [255, 153, 51], [255, 178, 102], [230, 230, 0], [255, 153, 255],
-                                      [153, 204, 255], [255, 102, 255], [255, 51, 255], [102, 178, 255], [51, 153, 255],
-                                      [255, 153, 153], [255, 102, 102], [255, 51, 51], [153, 255, 153], [102, 255, 102],
-                                      [51, 255, 51], [0, 255, 0], [0, 0, 255], [255, 0, 0], [255, 255, 255]],
-                                     dtype=np.uint8)
-
-    def __call__(self, i, bgr=False):
-        """Converts hex color codes to rgb values."""
-        c = self.palette[int(i) % self.n]
-        return (c[2], c[1], c[0]) if bgr else c
-
-    @staticmethod
-    def hex2rgb(h):  # rgb order (PIL)
-        return tuple(int(h[1 + i:1 + i + 2], 16) for i in (0, 2, 4))
-
-
-colors = Colors()  # create instance for 'from utils.plots import colors'
 
 class Yolov8Node(Node):
 
@@ -75,9 +50,9 @@ class Yolov8Node(Node):
         self.enable = self.get_parameter(
             "enable").get_parameter_value().bool_value
 
-        self.skeleton = [[16, 14], [14, 12], [17, 15], [15, 13], [12, 13], [6, 12], [7, 13], [6, 7], [6, 8], [7, 9],[8, 10], [9, 11], [2, 3], [1, 2], [1, 3], [2, 4], [3, 5], [4, 6], [5, 7]]
-        self.kpt_color = colors.pose_palette[[16, 16, 16, 16, 16, 0, 0, 0, 0, 0, 0, 9, 9, 9, 9, 9, 9]]
-        self.limb_color = colors.pose_palette[[9, 9, 9, 9, 7, 7, 7, 0, 0, 0, 0, 0, 16, 16, 16, 16, 16, 16, 16]]
+        #self.skeleton = [[16, 14], [14, 12], [17, 15], [15, 13], [12, 13], [6, 12], [7, 13], [6, 7], [6, 8], [7, 9],[8, 10], [9, 11], [2, 3], [1, 2], [1, 3], [2, 4], [3, 5], [4, 6], [5, 7]]
+        #self.kpt_color = colors.pose_palette[[16, 16, 16, 16, 16, 0, 0, 0, 0, 0, 0, 9, 9, 9, 9, 9, 9]]
+        #self.limb_color = colors.pose_palette[[9, 9, 9, 9, 7, 7, 7, 0, 0, 0, 0, 0, 16, 16, 16, 16, 16, 16, 16]]
 
         self._class_to_color = {}
         self.cv_bridge = CvBridge()
@@ -104,6 +79,7 @@ class Yolov8Node(Node):
         self._srv = self.create_service(SetBool, "enable", self.enable_cb)
 
     def pointcloud_cb(self, msg: PointCloud2) -> None:
+
         self.pointcloud = msg
         self.points = point_cloud2.read_points_list(self.pointcloud)
         
@@ -143,7 +119,7 @@ class Yolov8Node(Node):
         is_pose = nkpt == 17 and ndim == 3
         kpt_line &= is_pose  # `kpt_line=True` for now only supports human pose plotting
         for i, k in enumerate(kpts):
-            color_k = [int(x) for x in self.kpt_color[i]] if is_pose else colors(i)
+            color_k = [int(x) for x in Annotator.kpt_color[i]] if is_pose else colors(i)
             x_coord, y_coord = k[0], k[1]
             self.get_logger().info(f'{x_coord}, {y_coord}')
             if self.pointcloud != None:
@@ -158,7 +134,7 @@ class Yolov8Node(Node):
 
         if kpt_line:
             ndim = kpts.shape[-1]
-            for i, sk in enumerate(self.skeleton):
+            for i, sk in enumerate(Annotator.skeleton):
                 pos1 = (int(kpts[(sk[0] - 1), 0]), int(kpts[(sk[0] - 1), 1]))
                 pos2 = (int(kpts[(sk[1] - 1), 0]), int(kpts[(sk[1] - 1), 1]))
                 if ndim == 3:
@@ -166,7 +142,7 @@ class Yolov8Node(Node):
                     conf2 = kpts[(sk[1] - 1), 2]
                     if conf1 < 0.5 or conf2 < 0.5:
                         continue
-                cv2.line(cv_image, pos1, pos2, [int(x) for x in self.limb_color[i]], thickness=2, lineType=cv2.LINE_AA)
+                cv2.line(cv_image, pos1, pos2, [int(x) for x in Annotator.limb_color[i]], thickness=2, lineType=cv2.LINE_AA)
 
         return cv_image
 
@@ -184,9 +160,10 @@ class Yolov8Node(Node):
 
             #self.get_logger().info(f'{results[0].keypoints[0]}')
 
-            
-            result_image = self.kpts(results[0].keypoints[0], cv_image)
-            self._dbg_pub.publish(self.cv_bridge.cv2_to_imgmsg(result_image, encoding=msg.encoding))
+            keypoints = results[0].keypoints
+            for k in keypoints:
+                cv_image = self.kpts(results[0].keypoints[0], cv_image)
+            self._dbg_pub.publish(self.cv_bridge.cv2_to_imgmsg(cv_image, encoding=msg.encoding))
             # convert image + predict
             """ cv_image = self.cv_bridge.imgmsg_to_cv2(msg)
             results = self.yolo.predict(
