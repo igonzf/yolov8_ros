@@ -100,7 +100,7 @@ class Yolov8Node(Node):
         res.success = True
         return res
     
-    def kpts(self, kpts, cv_image, msg_image, radius=5, kpt_line=True):
+    def kpts(self, kpts, cv_image, radius=5, kpt_line=True):
         """Plot keypoints on the image.
         Args:
             kpts (tensor): Predicted keypoints with shape [17, 3]. Each keypoint has (x, y, confidence).
@@ -163,11 +163,10 @@ class Yolov8Node(Node):
             )
 
             if 'keypoints' in results[0].keys:
-                #self.get_logger().info(f'Pose model')
                 keypoints = results[0].keypoints
 
                 for k in keypoints:
-                    cv_image = self.kpts(k, cv_image, msg)
+                    cv_image = self.kpts(k, cv_image)
 
                 self._kpts_pub.publish(self.keypoints)
                 
