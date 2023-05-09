@@ -68,6 +68,14 @@ def generate_launch_description():
         remappings=[("image_raw", input_image_topic)]
     )
 
+    pose3d_node_cmd = Node(
+        package="yolov8_ros",
+        executable="pointcloud_pose_node",
+        name="pointcloud_pose_node",
+        namespace=namespace,
+        parameters=[]
+    )
+
     ld = LaunchDescription()
 
     ld.add_action(model_cmd)
@@ -79,5 +87,6 @@ def generate_launch_description():
     ld.add_action(namespace_cmd)
 
     ld.add_action(detector_node_cmd)
+    ld.add_action(pose3d_node_cmd)
 
     return ld

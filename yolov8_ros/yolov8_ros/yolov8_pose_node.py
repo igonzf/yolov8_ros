@@ -120,13 +120,14 @@ class Yolov8Node(Node):
             color_k = [int(x) for x in self.kpt_color[i]] if is_pose else colors(i)
             x_coord, y_coord = k[0], k[1]
 
-            keypoint = Keypoint()
-            keypoint.x = int(x_coord)
-            keypoint.y = int(y_coord)
-            keypoint.confidence = float(k[2])
-            keypointArray.keypoint_array.append(keypoint)
-
             if x_coord % cv_image.shape[1] != 0 and y_coord % cv_image.shape[0] != 0:
+                
+                keypoint = Keypoint()
+                keypoint.x = int(x_coord)
+                keypoint.y = int(y_coord)
+                keypoint.confidence = float(k[2])
+                keypointArray.keypoint_array.append(keypoint)
+
                 if len(k) == 3:
                     conf = k[2]
                     if conf < 0.5:
@@ -164,10 +165,12 @@ class Yolov8Node(Node):
 
             if 'keypoints' in results[0].keys:
                 keypoints = results[0].keypoints
-
+                self.keypoints.header.stamp = msg.header.stamp
+                self.keypoints.header.frame_id = msg.header.frame_id
+                
                 for k in keypoints:
                     cv_image = self.kpts(k, cv_image)
-
+                
                 self._kpts_pub.publish(self.keypoints)
                 
             # track

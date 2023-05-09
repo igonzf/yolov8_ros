@@ -5,6 +5,8 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
+find_package(std_msgs REQUIRED)
+
 # find dependencies
 find_package(ament_cmake REQUIRED)
 # uncomment the following section in order to fill in
@@ -29,6 +31,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Keypoint.msg"
   "msg/KeypointArray.msg"
   "msg/Keypoints.msg"
+  DEPENDENCIES std_msgs
 )
 
 ament_package()
