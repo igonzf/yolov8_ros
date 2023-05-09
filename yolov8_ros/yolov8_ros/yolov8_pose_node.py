@@ -3,23 +3,30 @@ import cv2
 import torch
 import random
 
+import numpy as np
 import rclpy
 from rclpy.qos import qos_profile_sensor_data
 from rclpy.node import Node
 from cv_bridge import CvBridge
+from rclpy.duration import Duration
 
 from ultralytics import YOLO
+from ultralytics.yolo.utils.plotting import Annotator, colors
 from ultralytics.tracker import BOTSORT, BYTETracker
 from ultralytics.tracker.trackers.basetrack import BaseTrack
 from ultralytics.yolo.utils import IterableSimpleNamespace, yaml_load
 from ultralytics.yolo.utils.checks import check_requirements, check_yaml
+from sensor_msgs_py import point_cloud2
 
 from sensor_msgs.msg import Image
 from vision_msgs.msg import Detection2D
 from vision_msgs.msg import ObjectHypothesisWithPose
 from vision_msgs.msg import Detection2DArray
 from std_srvs.srv import SetBool
-
+from sensor_msgs.msg import PointCloud2
+from visualization_msgs.msg import Marker
+from visualization_msgs.msg import MarkerArray
+from yolov8_msgs.msg import Keypoint, KeypointArray, Keypoints
 
 class Yolov8Node(Node):
 
@@ -47,16 +54,23 @@ class Yolov8Node(Node):
         self.enable = self.get_parameter(
             "enable").get_parameter_value().bool_value
 
+        self.skeleton = [[16, 14], [14, 12], [17, 15], [15, 13], [12, 13], [6, 12], [7, 13], [6, 7], [6, 8], [7, 9],[8, 10], [9, 11], [2, 3], [1, 2], [1, 3], [2, 4], [3, 5], [4, 6], [5, 7]]
+        self.kpt_color = colors.pose_palette[[16, 16, 16, 16, 16, 0, 0, 0, 0, 0, 0, 9, 9, 9, 9, 9, 9]]
+        self.limb_color = colors.pose_palette[[9, 9, 9, 9, 7, 7, 7, 0, 0, 0, 0, 0, 16, 16, 16, 16, 16, 16, 16]]
+
         self._class_to_color = {}
         self.cv_bridge = CvBridge()
         self.tracker = self.create_tracker(tracker)
         self.yolo = YOLO(model)
         self.yolo.fuse()
         self.yolo.to(device)
+        self.keypoints = Keypoints()
+
 
         # topcis
         self._pub = self.create_publisher(Detection2DArray, "detections", 10)
         self._dbg_pub = self.create_publisher(Image, "dbg_image", 10)
+        self._kpts_pub = self.create_publisher(Keypoints, "keypoints", 10)
         self._sub = self.create_subscription(
             Image, "image_raw", self.image_cb,
             qos_profile_sensor_data
@@ -85,21 +99,78 @@ class Yolov8Node(Node):
         self.enable = req.data
         res.success = True
         return res
+    
+    def kpts(self, kpts, cv_image, msg_image, radius=5, kpt_line=True):
+        """Plot keypoints on the image.
+        Args:
+            kpts (tensor): Predicted keypoints with shape [17, 3]. Each keypoint has (x, y, confidence).
+            shape (tuple): Image shape as a tuple (h, w), where h is the height and w is the width.
+            radius (int, optional): Radius of the drawn keypoints. Default is 5.
+            kpt_line (bool, optional): If True, the function will draw lines connecting keypoints
+                                    for human pose. Default is True.
+        Note: `kpt_line=True` currently only supports human pose plotting.
+        """
+        keypointArray = KeypointArray()
+
+        nkpt, ndim = kpts.shape
+        is_pose = nkpt == 17 and ndim == 3
+        kpt_line &= is_pose  # `kpt_line=True` for now only supports human pose plotting
+        for i, k in enumerate(kpts):
+
+            color_k = [int(x) for x in self.kpt_color[i]] if is_pose else colors(i)
+            x_coord, y_coord = k[0], k[1]
+
+            keypoint = Keypoint()
+            keypoint.x = int(x_coord)
+            keypoint.y = int(y_coord)
+            keypoint.confidence = float(k[2])
+            keypointArray.keypoint_array.append(keypoint)
+
+            if x_coord % cv_image.shape[1] != 0 and y_coord % cv_image.shape[0] != 0:
+                if len(k) == 3:
+                    conf = k[2]
+                    if conf < 0.5:
+                        continue
+                cv2.circle(cv_image, (int(x_coord), int(y_coord)), radius, color_k, -1, lineType=cv2.LINE_AA)
+
+        self.keypoints.keypoints.append(keypointArray)
+        
+
+        if kpt_line:
+            ndim = kpts.shape[-1]
+            for i, sk in enumerate(self.skeleton):
+                pos1 = (int(kpts[(sk[0] - 1), 0]), int(kpts[(sk[0] - 1), 1]))
+                pos2 = (int(kpts[(sk[1] - 1), 0]), int(kpts[(sk[1] - 1), 1]))
+                if ndim == 3:
+                    conf1 = kpts[(sk[0] - 1), 2]
+                    conf2 = kpts[(sk[1] - 1), 2]
+                    if conf1 < 0.5 or conf2 < 0.5:
+                        continue
+                cv2.line(cv_image, pos1, pos2, [int(x) for x in self.limb_color[i]], thickness=2, lineType=cv2.LINE_AA)
+
+        return cv_image
 
     def image_cb(self, msg: Image) -> None:
 
         if self.enable:
 
-            # convert image + predict
             cv_image = self.cv_bridge.imgmsg_to_cv2(msg)
             results = self.yolo.predict(
                 source=cv_image,
                 verbose=False,
                 stream=False,
                 conf=0.1,
-                mode="track"
             )
 
+            if 'keypoints' in results[0].keys:
+                #self.get_logger().info(f'Pose model')
+                keypoints = results[0].keypoints
+
+                for k in keypoints:
+                    cv_image = self.kpts(k, cv_image, msg)
+
+                self._kpts_pub.publish(self.keypoints)
+                
             # track
             det = results[0].boxes.cpu().numpy()
 
@@ -156,9 +227,9 @@ class Yolov8Node(Node):
                 color = self._class_to_color[label]
 
                 min_pt = (round(detection.bbox.center.position.x - detection.bbox.size_x / 2.0),
-                          round(detection.bbox.center.position.y - detection.bbox.size_y / 2.0))
+                        round(detection.bbox.center.position.y - detection.bbox.size_y / 2.0))
                 max_pt = (round(detection.bbox.center.position.x + detection.bbox.size_x / 2.0),
-                          round(detection.bbox.center.position.y + detection.bbox.size_y / 2.0))
+                        round(detection.bbox.center.position.y + detection.bbox.size_y / 2.0))
                 cv2.rectangle(cv_image, min_pt, max_pt, color, 2)
 
                 label = "{} ({}) ({:.3f})".format(label, str(track_id), score)
@@ -172,6 +243,7 @@ class Yolov8Node(Node):
 
             # publish detections and dbg image
             self._pub.publish(detections_msg)
+
             self._dbg_pub.publish(self.cv_bridge.cv2_to_imgmsg(cv_image,
                                                                encoding=msg.encoding))
 

@@ -57,8 +57,8 @@ def generate_launch_description():
     #
     detector_node_cmd = Node(
         package="yolov8_ros",
-        executable="yolov8_node",
-        name="yolov8_node",
+        executable="yolov8_pose_node",
+        name="yolov8_pose_node",
         namespace=namespace,
         parameters=[{"model": model,
                      "tracker": tracker,
