@@ -58,7 +58,7 @@ class PointCloudPoseNode(Node):
         tss.registerCallback(self.pointcloud_pose_cb)
 
     def pointcloud_pose_cb(self, msg_kpts: Keypoints, msg_pcl: PointCloud2) -> None:
-        self.get_logger().info('entra')
+
         points = point_cloud2.read_points_list(msg_pcl)
         
         for k_pose in msg_kpts.keypoints:
