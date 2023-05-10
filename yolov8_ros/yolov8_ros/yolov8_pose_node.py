@@ -121,17 +121,17 @@ class Yolov8Node(Node):
             x_coord, y_coord = k[0], k[1]
 
             if x_coord % cv_image.shape[1] != 0 and y_coord % cv_image.shape[0] != 0:
-                
-                keypoint = Keypoint()
-                keypoint.x = int(x_coord)
-                keypoint.y = int(y_coord)
-                keypoint.confidence = float(k[2])
-                keypointArray.keypoint_array.append(keypoint)
 
                 if len(k) == 3:
                     conf = k[2]
                     if conf < 0.5:
                         continue
+
+                keypoint = Keypoint()
+                keypoint.x = int(x_coord)
+                keypoint.y = int(y_coord)
+                keypoint.confidence = float(k[2])
+                keypointArray.keypoint_array.append(keypoint)
                 cv2.circle(cv_image, (int(x_coord), int(y_coord)), radius, color_k, -1, lineType=cv2.LINE_AA)
 
         self.keypoints.keypoints.append(keypointArray)
@@ -164,6 +164,7 @@ class Yolov8Node(Node):
             )
 
             if 'keypoints' in results[0].keys:
+                self.keypoints = Keypoints()
                 keypoints = results[0].keypoints
                 self.keypoints.header.stamp = msg.header.stamp
                 self.keypoints.header.frame_id = msg.header.frame_id
