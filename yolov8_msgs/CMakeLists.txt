@@ -28,9 +28,12 @@ endif()
 find_package(rosidl_default_generators REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
-  "msg/Keypoint.msg"
-  "msg/KeypointArray.msg"
-  "msg/Keypoints.msg"
+  "msg/Keypoint2D.msg"
+  "msg/Keypoint3D.msg"
+  "msg/PersonKeypoints2D.msg"
+  "msg/PersonKeypoints3D.msg"
+  "msg/PersonKeypoints2DArray.msg"
+  "msg/PersonKeypoints3DArray.msg"
   DEPENDENCIES std_msgs
 )
 

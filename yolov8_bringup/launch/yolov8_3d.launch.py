@@ -13,7 +13,7 @@ def generate_launch_description():
     model = LaunchConfiguration("model")
     model_cmd = DeclareLaunchArgument(
         "model",
-        default_value="yolov8n.pt",
+        default_value="yolov8n-pose.pt",
         description="Model name or path")
 
     tracker = LaunchConfiguration("tracker")
@@ -46,6 +46,24 @@ def generate_launch_description():
         default_value="/camera/rgb/image_raw",
         description="Name of the input image topic")
 
+    pointcloud_topic = LaunchConfiguration("pointcloud_topic")
+    pointcloud_topic_cmd = DeclareLaunchArgument(
+        "pointcloud_topic",
+        default_value="/camera/depth_registered/points",
+        description="Name of the pointcloud topic")
+    
+    object_detections_topic = LaunchConfiguration("object_detections_topic")
+    object_detections_topic_cmd = DeclareLaunchArgument(
+        "object_detections_topic",
+        default_value="/yolo/bags/detections",
+        description="Topic name of the detected object to point")
+    
+    person_detections_topic = LaunchConfiguration("person_detections_topic")
+    person_detections_topic_cmd = DeclareLaunchArgument(
+        "person_detections_topic",
+        default_value="/yolo/detections",
+        description="Topic name of the detected object to point")
+
     namespace = LaunchConfiguration("namespace")
     namespace_cmd = DeclareLaunchArgument(
         "namespace",
@@ -68,6 +86,16 @@ def generate_launch_description():
         remappings=[("image_raw", input_image_topic)]
     )
 
+    detector3d_node_cmd = Node(
+        package="yolov8_ros",
+        executable="yolov8_3d_node",
+        name="yolov8_3d_node",
+        namespace=namespace,
+        remappings=[("detections", object_detections_topic), 
+                    ("person_detections", person_detections_topic),
+                    ("depth_points", pointcloud_topic)]
+    )
+
     ld = LaunchDescription()
 
     ld.add_action(model_cmd)
@@ -77,7 +105,10 @@ def generate_launch_description():
     ld.add_action(threshold_cmd)
     ld.add_action(input_image_topic_cmd)
     ld.add_action(namespace_cmd)
-
+    ld.add_action(pointcloud_topic_cmd)
+    ld.add_action(object_detections_topic_cmd)
+    ld.add_action(person_detections_topic_cmd)
     ld.add_action(detector_node_cmd)
+    ld.add_action(detector3d_node_cmd)
 
     return ld

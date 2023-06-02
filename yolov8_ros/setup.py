@@ -21,8 +21,7 @@ setup(
     entry_points={
         'console_scripts': [
                 'yolov8_node = yolov8_ros.yolov8_node:main',
-                'yolov8_pose_node = yolov8_ros.yolov8_pose_node:main',
-                'pointcloud_pose_node = yolov8_ros.pointcloud_pose_node:main',
+                'yolov8_3d_node = yolov8_ros.yolov8_3d_node:main',
         ],
     },
 )
