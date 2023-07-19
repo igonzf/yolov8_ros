@@ -1,3 +1,17 @@
+# Copyright (C) 2023  Miguel Ángel González Santamarta
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import cv2
 import torch
@@ -26,7 +40,10 @@ from std_srvs.srv import SetBool
 from sensor_msgs.msg import PointCloud2
 from visualization_msgs.msg import Marker
 from visualization_msgs.msg import MarkerArray
+from vision_msgs.msg import Detection2DArray, BoundingBox2D
 from yolov8_msgs.msg import Keypoint2D, PersonKeypoints2D, PersonKeypoints2DArray
+from .calc_func import is_xy_in_bbox
+
 
 class Yolov8Node(Node):
 
@@ -53,10 +70,6 @@ class Yolov8Node(Node):
         self.declare_parameter("enable", True)
         self.enable = self.get_parameter(
             "enable").get_parameter_value().bool_value
-
-        self.skeleton = [[16, 14], [14, 12], [17, 15], [15, 13], [12, 13], [6, 12], [7, 13], [6, 7], [6, 8], [7, 9],[8, 10], [9, 11], [2, 3], [1, 2], [1, 3], [2, 4], [3, 5], [4, 6], [5, 7]]
-        self.kpt_color = colors.pose_palette[[16, 16, 16, 16, 16, 0, 0, 0, 0, 0, 0, 9, 9, 9, 9, 9, 9]]
-        self.limb_color = colors.pose_palette[[9, 9, 9, 9, 7, 7, 7, 0, 0, 0, 0, 0, 16, 16, 16, 16, 16, 16, 16]]
 
         self._class_to_color = {}
         self.cv_bridge = CvBridge()
@@ -100,7 +113,7 @@ class Yolov8Node(Node):
         res.success = True
         return res
     
-    def kpts(self, kpts, cv_image, radius=5, kpt_line=True):
+    def kpts(self, kpts, cv_image, pose_id=0, radius=5, kpt_line=True):
         """Plot keypoints on the image.
         Args:
             kpts (tensor): Predicted keypoints with shape [17, 3]. Each keypoint has (x, y, confidence).
@@ -108,38 +121,38 @@ class Yolov8Node(Node):
             radius (int, optional): Radius of the drawn keypoints. Default is 5.
             kpt_line (bool, optional): If True, the function will draw lines connecting keypoints
                                     for human pose. Default is True.
-        Note: `kpt_line=True` currently only supports human pose plotting.
         """
+        ann = Annotator(cv_image)
         keypointArray = PersonKeypoints2D()
+        keypointArray.id = int(pose_id)
 
         nkpt, ndim = kpts.shape
         is_pose = nkpt == 17 and ndim == 3
         kpt_line &= is_pose  # `kpt_line=True` for now only supports human pose plotting
+
         for i, k in enumerate(kpts):
 
-            color_k = [int(x) for x in self.kpt_color[i]] if is_pose else colors(i)
+            keypoint = Keypoint2D()
+
+            color_k = [int(x) for x in ann.kpt_color[i]] if is_pose else colors(i)
             x_coord, y_coord = k[0], k[1]
 
             if x_coord % cv_image.shape[1] != 0 and y_coord % cv_image.shape[0] != 0:
 
                 if len(k) == 3:
                     conf = k[2]
-                    if conf < 0.5:
-                        continue
+                    if conf >= 0.5:
+                        keypoint.x = int(x_coord)
+                        keypoint.y = int(y_coord)
+                        keypoint.confidence = float(k[2])
+                        cv2.circle(cv_image, (int(x_coord), int(y_coord)), radius, color_k, -1, lineType=cv2.LINE_AA)
 
-                keypoint = Keypoint2D()
-                keypoint.x = int(x_coord)
-                keypoint.y = int(y_coord)
-                keypoint.confidence = float(k[2])
-                keypointArray.keypoint_array.append(keypoint)
-                cv2.circle(cv_image, (int(x_coord), int(y_coord)), radius, color_k, -1, lineType=cv2.LINE_AA)
+            keypointArray.keypoint_array.append(keypoint)
 
         self.keypoints.keypoints.append(keypointArray)
-        
 
         if kpt_line:
-            ndim = kpts.shape[-1]
-            for i, sk in enumerate(self.skeleton):
+            for i, sk in enumerate(ann.skeleton):
                 pos1 = (int(kpts[(sk[0] - 1), 0]), int(kpts[(sk[0] - 1), 1]))
                 pos2 = (int(kpts[(sk[1] - 1), 0]), int(kpts[(sk[1] - 1), 1]))
                 if ndim == 3:
@@ -147,7 +160,7 @@ class Yolov8Node(Node):
                     conf2 = kpts[(sk[1] - 1), 2]
                     if conf1 < 0.5 or conf2 < 0.5:
                         continue
-                cv2.line(cv_image, pos1, pos2, [int(x) for x in self.limb_color[i]], thickness=2, lineType=cv2.LINE_AA)
+                cv2.line(cv_image, pos1, pos2, [int(x) for x in ann.limb_color[i]], thickness=2, lineType=cv2.LINE_AA)
 
         return cv_image
 
@@ -163,16 +176,11 @@ class Yolov8Node(Node):
                 conf=0.1,
             )
 
+            pose_keypoints = []
+
+            # get keypoints
             if 'keypoints' in results[0].keys:
-                self.keypoints = PersonKeypoints2DArray()
-                keypoints = results[0].keypoints
-                self.keypoints.header.stamp = msg.header.stamp
-                self.keypoints.header.frame_id = msg.header.frame_id
-                
-                for k in keypoints:
-                    cv_image = self.kpts(k, cv_image)
-                
-                self._kpts_pub.publish(self.keypoints)
+                pose_keypoints = results[0].keypoints.data
                 
             # track
             det = results[0].boxes.cpu().numpy()
@@ -247,6 +255,33 @@ class Yolov8Node(Node):
             # publish detections and dbg image
             self._pub.publish(detections_msg)
 
+            if len(pose_keypoints)>0:
+                self.keypoints = PersonKeypoints2DArray()
+                self.keypoints.header.stamp = msg.header.stamp
+                self.keypoints.header.frame_id = msg.header.frame_id
+                
+                for pose_kpt in pose_keypoints:
+
+                    pose_id = 0
+
+                    for b in results.boxes:
+                        box = b.xywh[0]
+                        bbox = BoundingBox2D()
+                        bbox.center.position.x = float(box[0])
+                        bbox.center.position.y = float(box[1])
+                        bbox.size_x = float(box[2])
+                        bbox.size_y = float(box[3])
+                        
+                        if any(is_xy_in_bbox(kpt, bbox) for kpt in pose_kpt):
+                            if not b.id is None:
+                                pose_id = str(int(b.id))
+                            
+                    cv_image = self.kpts(pose_kpt, cv_image, pose_id)
+
+                # publish kpts
+                self._kpts_pub.publish(self.keypoints)
+
+            # publish img with detections
             self._dbg_pub.publish(self.cv_bridge.cv2_to_imgmsg(cv_image,
                                                                encoding=msg.encoding))
 
